@@ -45,8 +45,8 @@ class FactChecker(object):
             print("Extracting relations from Prometheus...")
 
             try:
-                #  relations = requests.post('http://localhost:9000/api/en/extract', data=page).json()
-                relations = json.loads('[{ "subject": "Q76", "predictedPredicate": "P26", "obj": "Q13133", "sentence": "bla bla", "source": "eh", "probability": "0.99" }]')
+                relations = requests.post('http://localhost:8080/api/en/extract', data=page).json()
+                #  relations = json.loads('[{ "subject": "Q76", "predictedPredicate": "P26", "obj": "Q13133", "sentence": "bla bla", "source": "eh", "probability": "0.99" }]')
                 print("relations extracted: %s" % relations)
 
                 # group extracted relations together
@@ -137,7 +137,7 @@ class FactChecker(object):
         return ("conflicting", matches)
 
 if __name__ == "__main__":
-    #  cherrypy.config.update(
-            #  {'server.socket_host': '0.0.0.0'} )
+    cherrypy.config.update(
+            {'server.socket_port': 8081} )
     cherrypy.quickstart(FactChecker())
 
