@@ -9,6 +9,7 @@ class FactChecker(object):
     label_cache = {}
 
     def label_for(self, q):
+        print(f"labeling {q}")
         q = q.upper()
         if q in self.label_cache:
             return self.label_cache[q]
@@ -21,6 +22,10 @@ class FactChecker(object):
     def link_for(self, q):
         return f"https://www.wikidata.org/wiki/{q}"
 
+    def wiki_link_for(self, name):
+        name_quoted = name.replace(" ", "_")
+        return f"https://en.wikipedia.org/wiki/{name_quoted}"
+
     @cherrypy.expose
     def index(self):
         return "POST with URL to /check to do fact checking"
@@ -29,13 +34,13 @@ class FactChecker(object):
     @cherrypy.tools.json_out()
     def check(self, url=None):
         if url is not None:
-            print("GET %s..." % url)
+            print(f"GET {url}")
             try:
                 page = requests.get(url)
-            except:
-                print("Could not get url")
+            except requests.exceptions.RequestException as e:
+                print(f"Could not get url: {url}")
                 cherrypy.response.status = '503'
-                return "Could not get the requested url"
+                return f"Could not get the requested url: {url}"
 
             print("Extracting relations from Prometheus...")
 
@@ -56,7 +61,6 @@ class FactChecker(object):
                     # only check once per actual relation
                     print(extraction[0])
                     evidence = self.check_relation(extraction[0])
-                    print(evidence)
                     result = {}
                     result['subject'] = {
                         'name': self.label_for(extraction[0]['subject']),
@@ -72,12 +76,12 @@ class FactChecker(object):
                     }
                     result['sentences'] = list(map(lambda r: r['sentence'], extraction))
                     result['type'] = evidence[0]
+                    print("tampering with evidence")
                     for match in evidence[1]:
                         match['subject'] = self.label_for(match['subject'])
                         match['predictedPredicate'] = self.label_for(match['predictedPredicate'])
                         match['obj'] = self.label_for(match['obj'])
-                    result['evidence'] = evidence[1]
-                    
+                    result['evidence'] = list(map(lambda e: self.trim_evidence(e), evidence[1]))
                     results.append(result)
 
                 return results
@@ -87,8 +91,26 @@ class FactChecker(object):
                 cherrypy.response.status = '503'
                 return "An error occurred while connecting to Prometheus"
 
+        else:
+            cherrypy.response.status = '400'
+            return "No URL to check supplied"
 
-        return "all is well and the url is: " + str(url)
+    def trim_evidence(self, evidence):
+        name = evidence['source'].split(":")
+
+        if len(name) == 3:
+            name = name[2]
+        else:
+            name = ""
+
+        return {
+            'subject': evidence['subject'],
+            'object': evidence['obj'],
+            'predicate': evidence['predictedPredicate'],
+            'snippet': evidence['sentence'],
+            'link': self.wiki_link_for(self.label_for(name))
+        }
+
 
     def check_relation(self, relation):
         sub = relation['subject']
@@ -115,5 +137,7 @@ class FactChecker(object):
         return ("conflicting", matches)
 
 if __name__ == "__main__":
+    #  cherrypy.config.update(
+            #  {'server.socket_host': '0.0.0.0'} )
     cherrypy.quickstart(FactChecker())
 
