@@ -31,7 +31,7 @@ class FactChecker(object):
         if not text:
             return chunks
         else:
-            chunk = ".".join(text.split(".")[:5])
+            chunk = ".".join(text.split(".")[:5]) + "."
             rest = ".".join(text.split(".")[5:])
             return chunk_text(rest, chunks + [chunk])
 
