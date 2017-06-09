@@ -27,25 +27,31 @@ class FactChecker(object):
         name_quoted = name.replace(" ", "_")
         return f"https://en.wikipedia.org/wiki/{name_quoted}"
 
-    def chunk_text(self, text, chunks):
+    def chunk_text(self, text, chunks = []):
         if not text:
             return chunks
         else:
             chunk = ".".join(text.split(".")[:5]) + "."
             rest = ".".join(text.split(".")[5:])
-            return chunk_text(rest, chunks + [chunk])
+            return self.chunk_text(rest, chunks + [chunk])
 
     def get_relations(self, page):
         soup = BeautifulSoup(page, 'html.parser')
-        page = "\n".join([p.getText().strip() for p in soup.find_all('p')])
-        chunks = self.chunk_text(page)
+        chunks = [p.getText().strip() for p in soup.find_all('p')]
         relations = []
         for chunk in chunks:
-            resp = requests.post('http://localhost:8080/api/en/extract', data=chunk)
+            print(chunk)
+            resp = requests.post('http://localhost:8080/api/en/extract',
+                                 data=chunk.encode('UTF-8'),
+                                 headers={
+                                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
+                                })
             if resp.status_code == 200:
                 relations.append(resp.json())
+                print("resp: ", resp.json())
             else:
                 return (resp.status_code, resp.text)
+        relations = [val for sublist in relations for val in sublist]
         return (200, relations)
 
     @cherrypy.expose
@@ -77,8 +83,8 @@ class FactChecker(object):
                     relations = relations[1]
 
                 cherrypy.log("relations extracted: %s" % relations)
-            except:
-                cherrypy.log("An error ocurred while connecting to Prometheus")
+            except Exception as e:
+                cherrypy.log("An error ocurred while connecting to Prometheus: %s" % e)
                 cherrypy.response.status = '503'
                 return "An error occurred while connecting to Prometheus"
 
