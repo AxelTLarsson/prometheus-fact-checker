@@ -27,6 +27,27 @@ class FactChecker(object):
         name_quoted = name.replace(" ", "_")
         return f"https://en.wikipedia.org/wiki/{name_quoted}"
 
+    def chunk_text(self, text, chunks):
+        if not text:
+            return chunks
+        else:
+            chunk = ".".join(text.split(".")[:5])
+            rest = ".".join(text.split(".")[5:])
+            return chunk_text(rest, chunks + [chunk])
+
+    def get_relations(self, page):
+        soup = BeautifulSoup(page, 'html.parser')
+        page = "\n".join([p.getText().strip() for p in soup.find_all('p')])
+        chunks = self.chunk_text(page)
+        relations = []
+        for chunk in chunks:
+            resp = requests.post('http://localhost:8080/api/en/extract', data=chunk)
+            if resp.status_code == 200:
+                relations.append(resp.json())
+            else:
+                return (resp.status_code, resp.text)
+        return (200, relations)
+
     @cherrypy.expose
     def index(self):
         return "POST with URL to /check to do fact checking"
@@ -39,8 +60,6 @@ class FactChecker(object):
             cherrypy.log(f"GET {url}")
             try:
                 page = requests.get(url).text
-                soup = BeautifulSoup(page, 'html.parser')
-
             except requests.exceptions.RequestException as e:
                 cherrypy.log(f"Could not get url: {url}")
                 cherrypy.response.status = '503'
@@ -49,19 +68,15 @@ class FactChecker(object):
             # Connect to Prometheus
             cherrypy.log("Extracting relations from Prometheus...")
             try:
-                page = "\n".join([p.getText().strip() for p in soup.find_all('p')])
-                resp = requests.post('http://localhost:8080/api/en/extract', data=page)
-                if resp.status_code == 200:
-                    relations = resp.json()
-                else:
-                    cherrypy.log("Bad response from Prometheus: %s" resp.text)
+                relations = self.get_relations(page)
+                if relations[0] != 200:
+                    cherrypy.log(f"Bad response from Prometheus: {relations[1]}")
                     cherrypy.response.status = '503'
-                    return "Bad response from Prometheus: %s" resp.text
+                    return f"Bad response from Prometheus {relations[1]}"
+                else:
+                    relations = relations[1]
 
-                #  relations = json.loads('[{ "subject": "Q76", "predictedPredicate": "P26", "obj": "Q13133", "sentence": "bla bla", "source": "eh", "probability": "0.99" }]')
                 cherrypy.log("relations extracted: %s" % relations)
-                # group extracted relations together
-
             except:
                 cherrypy.log("An error ocurred while connecting to Prometheus")
                 cherrypy.response.status = '503'
