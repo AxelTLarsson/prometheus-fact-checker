@@ -50,7 +50,14 @@ class FactChecker(object):
             cherrypy.log("Extracting relations from Prometheus...")
             try:
                 page = "\n".join([p.getText().strip() for p in soup.find_all('p')])
-                relations = requests.post('http://localhost:8080/api/en/extract', data=page).json()
+                resp = requests.post('http://localhost:8080/api/en/extract', data=page)
+                if resp.status_code == 200:
+                    relations = resp.json()
+                else:
+                    cherrypy.log("Bad response from Prometheus: %s" resp.text)
+                    cherrypy.response.status = '503'
+                    return "Bad response from Prometheus: %s" resp.text
+
                 #  relations = json.loads('[{ "subject": "Q76", "predictedPredicate": "P26", "obj": "Q13133", "sentence": "bla bla", "source": "eh", "probability": "0.99" }]')
                 cherrypy.log("relations extracted: %s" % relations)
                 # group extracted relations together
@@ -146,4 +153,3 @@ if __name__ == "__main__":
     cherrypy.config.update(
             {'server.socket_port': 8081} )
     cherrypy.quickstart(FactChecker())
-
