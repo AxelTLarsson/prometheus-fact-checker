@@ -3,6 +3,7 @@ import cherrypy
 import json
 import glob
 from itertools import groupby
+from bs4 import BeautifulSoup
 
 class FactChecker(object):
     data_cache = []
@@ -37,7 +38,9 @@ class FactChecker(object):
             # GET the page
             cherrypy.log(f"GET {url}")
             try:
-                page = requests.get(url)
+                page = requests.get(url).text
+                soup = BeautifulSoup(page, 'html.parser')
+
             except requests.exceptions.RequestException as e:
                 cherrypy.log(f"Could not get url: {url}")
                 cherrypy.response.status = '503'
@@ -46,6 +49,7 @@ class FactChecker(object):
             # Connect to Prometheus
             cherrypy.log("Extracting relations from Prometheus...")
             try:
+                page = "\n".join([p.getText().strip() for p in soup.find_all('p')])
                 relations = requests.post('http://localhost:8080/api/en/extract', data=page).json()
                 #  relations = json.loads('[{ "subject": "Q76", "predictedPredicate": "P26", "obj": "Q13133", "sentence": "bla bla", "source": "eh", "probability": "0.99" }]')
                 cherrypy.log("relations extracted: %s" % relations)
