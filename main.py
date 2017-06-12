@@ -9,14 +9,16 @@ from itertools import groupby
 from bs4 import BeautifulSoup
 
 class FactChecker(object):
-    data_cache = []
-    label_cache = {}
+
+    def __init__(self):
+        self.data_cache = []
+        self.label_cache = {}
 
     def label_for(self, q):
-        cherrypy.log(f"labeling {q}")
         q = q.upper()
         if q in self.label_cache:
             return self.label_cache[q]
+        cherrypy.log(f"labeling {q}")
         url = 'https://www.wikidata.org/w/api.php?action=wbgetentities&props=labels&ids=%s&languages=en&format=json' % q
         resp = requests.get(url)
         v = resp.json()['entities'][q]['labels']['en']['value']
@@ -50,7 +52,7 @@ class FactChecker(object):
         for chunk in chunks:
             cherrypy.log("posting to Prometheus:")
             cherrypy.log(chunk)
-            resp = requests.post('http://localhost:8080/api/en/extract',
+            resp = session.post('http://localhost:8080/api/en/extract',
                                  data=chunk.encode('UTF-8'),
                                  headers={
                                     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
@@ -63,7 +65,7 @@ class FactChecker(object):
             resp = f.result()
             if resp.status_code == 200:
                 relations.append(resp.json())
-                cherrypy.log("resp: ", resp.json())
+                cherrypy.log(f"resp: {resp.json()}")
             else:
                 return (resp.status_code, resp.text)
         relations = [val for sublist in relations for val in sublist]
@@ -173,6 +175,7 @@ class FactChecker(object):
                 with open(path) as file:
                     lines = file.readlines()
                     self.data_cache.extend([json.loads(l) for l in lines])
+
         matches = [match for match in self.data_cache if match['predictedPredicate'] == pred and match['subject'] == sub]
 
         if len(matches) == 0:

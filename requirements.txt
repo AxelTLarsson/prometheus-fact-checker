@@ -1,0 +1,13 @@
+beautifulsoup4==4.6.0
+certifi==2017.4.17
+chardet==3.0.3
+cheroot==5.5.0
+CherryPy==10.2.2
+idna==2.5
+portend==1.8
+pytz==2017.2
+requests==2.17.3
+requests-futures==0.9.7
+six==1.10.0
+tempora==1.7
+urllib3==1.21.1
