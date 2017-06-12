@@ -1,4 +1,7 @@
 import requests
+from requests_futures.sessions import FuturesSession
+import concurrent
+from concurrent.futures import ALL_COMPLETED
 import cherrypy
 import json
 import glob
@@ -37,11 +40,22 @@ class FactChecker(object):
 
     def get_relations(self, page):
         soup = BeautifulSoup(page, 'html.parser')
-        page = "\n".join([p.getText().strip() for p in soup.find_all('p')])
-        chunks = self.chunk_text(page)
+        chunks = [p.getText().strip() for p in soup.find_all('p')]
         relations = []
+        session = FuturesSession(max_workers=10)
+        fs = []
+        # Send concurrent requests to extract chunks
+        if not chunks:
+            cherrypy.log("No text in page")
         for chunk in chunks:
-            resp = requests.post('http://localhost:8080/api/en/extract', data=chunk)
+            cherrypy.log("posting to Prometheus")
+            resp = session.post('http://localhost:8080/api/en/extract', data=chunk)
+            fs.append(resp)
+        # Await completion
+        concurrent.futures.wait(fs, return_when=ALL_COMPLETED)
+        for f in fs:
+            cherrypy.log(f"resp.done() {f.done()}")
+            resp = f.result()
             if resp.status_code == 200:
                 relations.append(resp.json())
             else:
@@ -77,10 +91,10 @@ class FactChecker(object):
                     relations = relations[1]
 
                 cherrypy.log("relations extracted: %s" % relations)
-            except:
-                cherrypy.log("An error ocurred while connecting to Prometheus")
+            except Exception as e:
+                cherrypy.log(f"An error ocurred while connecting to Prometheus: {e}")
                 cherrypy.response.status = '503'
-                return "An error occurred while connecting to Prometheus"
+                return f"An error occurred while connecting to Prometheus: {e}"
 
             # Group extracted relations by relation triple
             def keyfunc(relation):
