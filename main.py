@@ -9,6 +9,8 @@ from itertools import groupby
 from bs4 import BeautifulSoup
 import copy
 
+CHUNK_SIZE = 10 # Number of paragraphs in a chunk
+
 class FactChecker(object):
 
     def __init__(self):
@@ -43,8 +45,14 @@ class FactChecker(object):
 
     def get_relations(self, page):
         soup = BeautifulSoup(page, 'html.parser')
-        chunks = [p.getText().strip() for p in soup.find_all("p")]
-        chunks = [c for c in chunks if c != ""]
+
+        # Chunking
+        paragraphs = [p.getText().strip() for p in soup.find_all('p')]
+        paragraphs = [c for c in paragraphs if c != '']
+        chunks = []
+        for i in range(0, len(paragraphs), CHUNK_SIZE):
+            chunks.append('. '.join(paragraphs[i:i+CHUNK_SIZE]))
+
         relations = []
         session = FuturesSession(max_workers=2)
         fs = []
