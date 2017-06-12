@@ -7,6 +7,7 @@ import json
 import glob
 from itertools import groupby
 from bs4 import BeautifulSoup
+import copy
 
 class FactChecker(object):
 
@@ -18,7 +19,7 @@ class FactChecker(object):
         q = q.upper()
         if q in self.label_cache:
             return self.label_cache[q]
-        cherrypy.log(f"labeling {q}")
+        cherrypy.log(f"Resolving name for {q}")
         url = 'https://www.wikidata.org/w/api.php?action=wbgetentities&props=labels&ids=%s&languages=en&format=json' % q
         resp = requests.get(url)
         v = resp.json()['entities'][q]['labels']['en']['value']
@@ -42,16 +43,15 @@ class FactChecker(object):
 
     def get_relations(self, page):
         soup = BeautifulSoup(page, 'html.parser')
-        chunks = [p.getText().strip() for p in soup.find_all('p')]
+        chunks = [p.getText().strip() for p in soup.find_all("p")]
+        chunks = [c for c in chunks if c != ""]
         relations = []
-        session = FuturesSession(max_workers=10)
+        session = FuturesSession(max_workers=2)
         fs = []
         # Send concurrent requests to extract chunks
         if not chunks:
             cherrypy.log("No text in page")
         for chunk in chunks:
-            cherrypy.log("posting to Prometheus:")
-            cherrypy.log(chunk)
             resp = session.post('http://localhost:8080/api/en/extract',
                                  data=chunk.encode('UTF-8'),
                                  headers={
@@ -61,11 +61,9 @@ class FactChecker(object):
         # Await completion
         concurrent.futures.wait(fs, return_when=ALL_COMPLETED)
         for f in fs:
-            cherrypy.log(f"resp.done() {f.done()}")
             resp = f.result()
             if resp.status_code == 200:
                 relations.append(resp.json())
-                cherrypy.log(f"resp: {resp.json()}")
             else:
                 return (resp.status_code, resp.text)
         relations = [val for sublist in relations for val in sublist]
@@ -99,7 +97,7 @@ class FactChecker(object):
                 else:
                     relations = relations[1]
 
-                cherrypy.log("relations extracted: %s" % relations)
+                cherrypy.log("Relations extracted: %s" % relations)
             except Exception as e:
                 cherrypy.log(f"An error ocurred while connecting to Prometheus: {e}")
                 cherrypy.response.status = '503'
@@ -132,7 +130,7 @@ class FactChecker(object):
                 }
                 result['sentences'] = list(map(lambda r: r['sentence'], extraction))
                 result['type'] = evidence[0]
-                cherrypy.log("tampering with evidence")
+
                 for match in evidence[1]:
                     match['subject'] = self.label_for(match['subject'])
                     match['predictedPredicate'] = self.label_for(match['predictedPredicate'])
@@ -159,16 +157,17 @@ class FactChecker(object):
             'object': evidence['obj'],
             'predicate': evidence['predictedPredicate'],
             'snippet': evidence['sentence'],
-            'link': self.wiki_link_for(self.label_for(name))
+            'link': self.wiki_link_for(self.label_for(name)),
+            'source': 'Wikipedia',
+            'probability': evidence['probability']
         }
-
 
     def check_relation(self, relation):
         sub = relation['subject']
         obj = relation['obj']
         pred = relation['predictedPredicate']
 
-        if not self.data_cache:
+        if len(self.data_cache) == 0:
             # read data
             files = glob.glob("extractions/part-*")
             for path in files:
@@ -176,7 +175,8 @@ class FactChecker(object):
                     lines = file.readlines()
                     self.data_cache.extend([json.loads(l) for l in lines])
 
-        matches = [match for match in self.data_cache if match['predictedPredicate'] == pred and match['subject'] == sub]
+        matches = [match for match in self.data_cache if (match['subject'] == sub
+                   and match['predictedPredicate'] == pred)]
 
         if len(matches) == 0:
             return ("unknown", [])
@@ -184,11 +184,11 @@ class FactChecker(object):
         for match in matches:
             if match['obj'] == obj:
                 # found one match, the relation is considered True
-                return ("verified", [match])
+                return ("verified", [copy.deepcopy(match)])
 
-        return ("conflicting", matches)
+        return ("conflicting", copy.deepcopy(matches))
 
 if __name__ == "__main__":
     cherrypy.config.update(
-            {'server.socket_port': 8081} )
+            {'server.socket_port': 8081})
     cherrypy.quickstart(FactChecker())
