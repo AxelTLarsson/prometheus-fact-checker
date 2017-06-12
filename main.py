@@ -30,13 +30,13 @@ class FactChecker(object):
         name_quoted = name.replace(" ", "_")
         return f"https://en.wikipedia.org/wiki/{name_quoted}"
 
-    def chunk_text(self, text, chunks):
+    def chunk_text(self, text, chunks = []):
         if not text:
             return chunks
         else:
             chunk = ".".join(text.split(".")[:5]) + "."
             rest = ".".join(text.split(".")[5:])
-            return chunk_text(rest, chunks + [chunk])
+            return self.chunk_text(rest, chunks + [chunk])
 
     def get_relations(self, page):
         soup = BeautifulSoup(page, 'html.parser')
@@ -48,8 +48,13 @@ class FactChecker(object):
         if not chunks:
             cherrypy.log("No text in page")
         for chunk in chunks:
-            cherrypy.log("posting to Prometheus")
-            resp = session.post('http://localhost:8080/api/en/extract', data=chunk)
+            cherrypy.log("posting to Prometheus:")
+            cherrypy.log(chunk)
+            resp = requests.post('http://localhost:8080/api/en/extract',
+                                 data=chunk.encode('UTF-8'),
+                                 headers={
+                                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
+                                })
             fs.append(resp)
         # Await completion
         concurrent.futures.wait(fs, return_when=ALL_COMPLETED)
@@ -58,8 +63,10 @@ class FactChecker(object):
             resp = f.result()
             if resp.status_code == 200:
                 relations.append(resp.json())
+                cherrypy.log("resp: ", resp.json())
             else:
                 return (resp.status_code, resp.text)
+        relations = [val for sublist in relations for val in sublist]
         return (200, relations)
 
     @cherrypy.expose
