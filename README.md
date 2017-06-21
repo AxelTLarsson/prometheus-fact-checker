@@ -1,2 +1,2 @@
 # prometheus-fact-checker
-Check facts against Prometheus Fact Extractor 
+Check facts against Prometheus Fact Extractor
