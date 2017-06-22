@@ -13,6 +13,7 @@ from functools import partial
 CHUNK_SIZE = 10 # Number of paragraphs in a chunk
 PARALLEL_REQUESTS = 10
 PROMETHEUS_URL = 'http://localhost:8080/api/en/extract'
+PROMETHEUS_TIMEOUT = 120 # Maximum number of seconds to wait for Prometheus for one page extraction
 
 class FactChecker(object):
 
@@ -95,9 +96,17 @@ class FactChecker(object):
             resp.add_done_callback(partial(response_completed_callback, chunk))
 
         # Await completion of all reponses
-        cherrypy.log("Waiting up to 120 s for all extaction requests to complete...")
-        concurrent.futures.wait(fs, timeout=120, return_when=ALL_COMPLETED)
-        cherrypy.log("Done")
+        try:
+            cherrypy.log(f"Waiting up to {PROMETHEUS_TIMEOUT} s for all extraction requests to complete...")
+            (done, not_done) = concurrent.futures.wait(fs, timeout=PROMETHEUS_TIMEOUT, return_when=ALL_COMPLETED)
+            fs = done
+            cherrypy.log("Done")
+        except Exception as e:
+            cherrypy.log("Some requests did not finish within {PROMETHEUS_TIMEOUT} s.")
+            for f in not_done:
+                f.cancel()
+
+
 
         relations = []
         for f in fs:
