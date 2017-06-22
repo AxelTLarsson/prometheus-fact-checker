@@ -8,8 +8,11 @@ import glob
 from itertools import groupby
 from bs4 import BeautifulSoup
 import copy
+from functools import partial
 
 CHUNK_SIZE = 10 # Number of paragraphs in a chunk
+PARALLEL_REQUESTS = 10
+PROMETHEUS_URL = 'http://localhost:8080/api/en/extract'
 
 class FactChecker(object):
 
@@ -43,6 +46,10 @@ class FactChecker(object):
             rest = ".".join(text.split(".")[5:])
             return self.chunk_text(rest, chunks + [chunk])
 
+    # Get a list of extracted relations from Prometheus for "page"
+    # The page is chunked by CHUNK_SIZE number of paragraphs and sent up to PARALLEL_REQUESTS in parallel
+    # If any of those requests fails, it will be logged but no further action will be taken
+    # The return value is a list of relations
     def get_relations(self, page):
         soup = BeautifulSoup(page, 'html.parser')
 
@@ -53,29 +60,62 @@ class FactChecker(object):
         for i in range(0, len(paragraphs), CHUNK_SIZE):
             chunks.append('. '.join(paragraphs[i:i+CHUNK_SIZE]))
 
-        relations = []
-        session = FuturesSession(max_workers=2)
+        session = FuturesSession(max_workers=PARALLEL_REQUESTS)
         fs = []
+
         # Send concurrent requests to extract chunks
         if not chunks:
             cherrypy.log("No text in page")
         for chunk in chunks:
-            resp = session.post('http://localhost:8080/api/en/extract',
-                                 data=chunk.encode('UTF-8'),
-                                 headers={
-                                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
-                                })
+            resp = session.post(
+                    PROMETHEUS_URL,
+                    data=chunk.encode('UTF-8'),
+                    headers={
+                        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
+                        },
+                    timeout=60)
             fs.append(resp)
-        # Await completion
-        concurrent.futures.wait(fs, return_when=ALL_COMPLETED)
+            cherrypy.log("Sent chunk for extraction")
+
+            # Print some info when responses complete
+            def response_completed_callback(data, f):
+                cherrypy.log("An extraction request completed")
+                try:
+                    res = f.result()
+                    if res.status_code != 200:
+                        cherrypy.log("HTTP Status Code NOK!")
+                        cherrypy.log("Original data was")
+                        cherrypy.log(data)
+
+                except Exception as e:
+                    cherrypy.log(f"Raised exception")
+                    cherrypy.log("Original data was:")
+                    cherrypy.log(data)
+
+            resp.add_done_callback(partial(response_completed_callback, chunk))
+
+        # Await completion of all reponses
+        cherrypy.log("Waiting up to 120 s for all extaction requests to complete...")
+        concurrent.futures.wait(fs, timeout=120, return_when=ALL_COMPLETED)
+        cherrypy.log("Done")
+
+        relations = []
         for f in fs:
-            resp = f.result()
-            if resp.status_code == 200:
-                relations.append(resp.json())
-            else:
-                return (resp.status_code, resp.text)
-        relations = [val for sublist in relations for val in sublist]
-        return (200, relations)
+            try:
+                # Low timeout because above wait should have ensured all were completed
+                resp = f.result(timeout=0.001)
+                if resp.status_code == 200:
+                    relations.append(resp.json())
+                else:
+                    cherrypy.log(f"Response: {resp.status_code} {resp.text}")
+            except Exception as e:
+                cherrypy.log(f"Request failed: {e}")
+
+        return self.flatten(relations)
+
+    def flatten(self, the_list):
+        return [val for sublist in the_list for val in sublist]
+
 
     @cherrypy.expose
     def index(self):
@@ -88,28 +128,15 @@ class FactChecker(object):
             # GET the page
             cherrypy.log(f"GET {url}")
             try:
-                page = requests.get(url).text
-            except requests.exceptions.RequestException as e:
-                cherrypy.log(f"Could not get url: {url}")
+                page = requests.get(url, timeout=10).text
+            except Exception as e:
+                cherrypy.log(f"Could not get url: {url}: {e}")
                 cherrypy.response.status = '503'
                 return f"Could not get the requested url: {url}"
 
             # Connect to Prometheus
             cherrypy.log("Extracting relations from Prometheus...")
-            try:
-                relations = self.get_relations(page)
-                if relations[0] != 200:
-                    cherrypy.log(f"Bad response from Prometheus: {relations[1]}")
-                    cherrypy.response.status = '503'
-                    return f"Bad response from Prometheus {relations[1]}"
-                else:
-                    relations = relations[1]
-
-                cherrypy.log("Relations extracted: %s" % relations)
-            except Exception as e:
-                cherrypy.log(f"An error ocurred while connecting to Prometheus: {e}")
-                cherrypy.response.status = '503'
-                return f"An error occurred while connecting to Prometheus: {e}"
+            relations = self.get_relations(page)
 
             # Group extracted relations by relation triple
             def keyfunc(relation):
@@ -144,6 +171,7 @@ class FactChecker(object):
                     match['predictedPredicate'] = self.label_for(match['predictedPredicate'])
                     match['obj'] = self.label_for(match['obj'])
                 result['evidence'] = list(map(lambda e: self.trim_evidence(e), evidence[1]))
+                result['probablity'] = extraction[0]['probability']
                 results.append(result)
 
             return results
