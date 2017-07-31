@@ -16,3 +16,10 @@ This is done automatically by our Docker image, run it using the following comma
 docker build -t prometheus/fact_checker:latest .
 docker run -p 8081:8081 -t prometheus/fact_checker:latest
 ```
+
+Note that if you are using Docker behind a corporate proxy you need to configure the image for that.
+Use the following Makefile designed for a cntlm proxy running on port 3128.
+
+```bash
+make -f scripts/Makefile
+``` 
