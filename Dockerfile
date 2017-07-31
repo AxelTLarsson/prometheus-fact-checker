@@ -11,7 +11,7 @@ COPY main.py ./
 
 ENV DATABASE_URL "https://s3-eu-west-1.amazonaws.com/sony-prometheus-data/docker_data/extractions.tar.gz"
 ADD $DATABASE_URL ./
-RUN tar xvf extractions.tar.gz && rm -f extractions.tar.gz
+RUN rm -f ./extractions.tar.gz
 
 EXPOSE 8081
 VOLUME /extractions
