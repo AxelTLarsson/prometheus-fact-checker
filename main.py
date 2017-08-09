@@ -28,8 +28,12 @@ class FactChecker(object):
         cherrypy.log(f"Resolving name for {q}")
         url = 'https://www.wikidata.org/w/api.php?action=wbgetentities&props=labels&ids=%s&languages=en&format=json' % q
         resp = requests.get(url)
-        v = resp.json()['entities'][q]['labels']['en']['value']
-        self.label_cache[q] = v
+        try:
+            v = resp.json()['entities'][q]['labels']['en']['value']
+            self.label_cache[q] = v
+        except Exception as e:
+            cherrypy.log(f"Could not resolve name for {q}")
+            v = "unknown"
         return v
 
     def link_for(self, q):
